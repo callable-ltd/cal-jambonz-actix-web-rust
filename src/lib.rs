@@ -65,12 +65,12 @@ pub enum JambonzRequest {
 }
 
 pub struct JambonzWebServer<T> {
-    bind_ip: String,
-    bind_port: u16,
-    app_state: T,
-    ws_path: String,
-    record_path: String,
-    handler: fn(Uuid, Session, JambonzRequest, T),
+    pub   bind_ip: String,
+    pub  bind_port: u16,
+    pub  app_state: T,
+    pub  ws_path: String,
+    pub  record_path: String,
+    pub  handler: fn(Uuid, Session, JambonzRequest, T),
 }
 
 #[derive(Clone)]
