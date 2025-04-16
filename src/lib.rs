@@ -2,8 +2,8 @@ mod handler;
 
 use actix_web::dev::Server;
 use actix_web::http::header::{HeaderName, HeaderValue};
-use actix_web::web::{resource, Data, Payload};
-use actix_web::{middleware, rt, web, App, Error, HttpRequest, HttpResponse, HttpServer};
+use actix_web::web::{Data, Payload, resource};
+use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, middleware, rt, web};
 use actix_ws::Session;
 use cal_jambonz::ws::WebsocketRequest;
 use uuid::Uuid;
@@ -47,9 +47,8 @@ fn ws_response<T: 'static + Clone>(
         msg_stream,
         state.clone(),
     ));
-    let ws_header =
-        HeaderName::from_bytes("Sec-WebSocket-Protocol".to_string().as_bytes())
-            .expect("should be valid WebSocket-Protocol");
+    let ws_header = HeaderName::from_bytes("Sec-WebSocket-Protocol".to_string().as_bytes())
+        .expect("should be valid WebSocket-Protocol");
 
     res.headers_mut().insert(
         ws_header.clone(),
@@ -65,12 +64,12 @@ pub enum JambonzRequest {
 }
 
 pub struct JambonzWebServer<T> {
-    pub   bind_ip: String,
-    pub  bind_port: u16,
-    pub  app_state: T,
-    pub  ws_path: String,
-    pub  record_path: String,
-    pub  handler: fn(Uuid, Session, JambonzRequest, T),
+    pub bind_ip: String,
+    pub bind_port: u16,
+    pub app_state: T,
+    pub ws_path: String,
+    pub record_path: String,
+    pub handler: fn(Uuid, Session, JambonzRequest, T),
 }
 
 #[derive(Clone)]
@@ -80,7 +79,7 @@ pub struct JambonzState<T> {
 }
 
 impl<T: Send + Sync + 'static + Clone> JambonzWebServer<T> {
-    pub async fn start(self) -> Server {
+    pub async fn start(self) -> std::io::Result<()> {
         HttpServer::new(move || {
             let state = Data::new(JambonzState {
                 app_state: self.app_state.clone(),
@@ -97,5 +96,6 @@ impl<T: Send + Sync + 'static + Clone> JambonzWebServer<T> {
         .bind((self.bind_ip, self.bind_port))
         .expect("Can not bind to server/port")
         .run()
+        .await
     }
 }
