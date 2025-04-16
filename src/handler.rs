@@ -1,4 +1,4 @@
-use crate::{HandlerFn, JambonzRequest, JambonzState};
+use crate::{HandlerContext, HandlerFn, JambonzRequest, JambonzState};
 use actix_web::web::Data;
 use actix_ws::{Message, Session};
 use futures_util::{
@@ -43,14 +43,13 @@ pub async fn handler<T: 'static + Clone>(
                     Message::Text(text) => match serde_json::from_str(&text) {
                         Ok(json) => {
                             let req = JambonzRequest::TextMessage(json);
-                            jambonz_handler(
+                            let ctx = HandlerContext {
                                 uuid,
-                                session.clone(),
-                                req,
-                                state.clone(),
-                                state.handler.clone(),
-                            )
-                                .await;
+                                session: session.clone(),
+                                request: req,
+                                state: state.state.clone(),
+                            };
+                            (state.handler)(ctx).await;
                         }
                         Err(e) => {
                             println!("Error reading TextMessage: {}", e);
@@ -59,26 +58,24 @@ pub async fn handler<T: 'static + Clone>(
 
                     Message::Binary(bytes) => {
                         let req = JambonzRequest::Binary(bytes.into_iter().collect::<Vec<_>>());
-                        jambonz_handler(
+                        let ctx = HandlerContext {
                             uuid,
-                            session.clone(),
-                            req,
-                            state.clone(),
-                            state.handler.clone(),
-                        )
-                            .await;
+                            session: session.clone(),
+                            request: req,
+                            state: state.state.clone(),
+                        };
+                        (state.handler)(ctx).await;
                     }
 
                     Message::Close(reason) => {
                         let req = JambonzRequest::Close;
-                        jambonz_handler(
+                        let ctx = HandlerContext {
                             uuid,
-                            session.clone(),
-                            req,
-                            state.clone(),
-                            state.handler.clone(),
-                        )
-                            .await;
+                            session: session.clone(),
+                            request: req,
+                            state: state.state.clone(),
+                        };
+                        (state.handler)(ctx).await;
                         break reason;
                     }
 
@@ -127,14 +124,4 @@ pub async fn handler<T: 'static + Clone>(
 
     // attempt to close connection gracefully
     let _ = session.close(reason).await;
-}
-
-async fn jambonz_handler<T: 'static + Clone>(
-    uuid: Uuid,
-    session: Session,
-    request: JambonzRequest,
-    state: Data<JambonzState<T>>,
-    f: HandlerFn<T>,
-) {
-    f(uuid, session, request, state.state.clone()).await;
 }

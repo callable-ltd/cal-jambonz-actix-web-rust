@@ -11,20 +11,18 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 pub type HandlerFn<T> = Arc<
-    dyn Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send>>
-        + Send
-        + Sync,
+    dyn Fn(HandlerContext<T>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
 >;
 
-pub fn register_handler<T, F>(handler: F) -> HandlerFn<T>
+pub fn register_handler<T, F, Fut>(handler: F) -> HandlerFn<T>
 where
-    T: Clone + Send + 'static, // T must be Clone and Send to be passed between threads
-    F: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send>>
-        + Send
-        + Sync
-        + 'static,
+    T: Clone + Send + Sync + 'static,
+    F: Fn(HandlerContext<T>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
 {
-    Arc::new(handler)
+    Arc::new(move |ctx: HandlerContext<T>| {
+        Box::pin(handler(ctx))
+    })
 }
 
 async fn handle_record<T: 'static + Clone>(
@@ -118,4 +116,11 @@ pub struct JambonzWebServer<T> {
     pub app_state: T,
     pub ws_path: String,
     pub record_path: String,
+}
+
+pub struct HandlerContext<T> {
+    pub uuid: Uuid,
+    pub session: Session,
+    pub request: JambonzRequest,
+    pub state: T,
 }
