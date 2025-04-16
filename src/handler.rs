@@ -2,9 +2,10 @@ use crate::{JambonzRequest, JambonzState};
 use actix_web::web::Data;
 use actix_ws::{Message, Session};
 use futures_util::{
-    future::{self, Either},
     StreamExt as _,
+    future::{self, Either},
 };
+use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio::{pin, time::interval};
 use uuid::Uuid;
@@ -19,8 +20,7 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub async fn echo_heartbeat_ws<
     T: 'static + Clone,
-    U: Fn(Uuid, Session, JambonzRequest, T)
-        + Clone,
+    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()>>> + Clone,
 >(
     mut session: Session,
     mut msg_stream: actix_ws::MessageStream,
@@ -53,7 +53,8 @@ pub async fn echo_heartbeat_ws<
                                 req,
                                 state.app_state.clone(),
                                 state.handler.clone(),
-                            );
+                            )
+                            .await;
                         }
                         Err(e) => {
                             println!("Error reading TextMessage: {}", e);
@@ -68,7 +69,8 @@ pub async fn echo_heartbeat_ws<
                             req,
                             state.app_state.clone(),
                             state.handler.clone(),
-                        );
+                        )
+                        .await;
                     }
 
                     Message::Close(reason) => {
@@ -79,7 +81,8 @@ pub async fn echo_heartbeat_ws<
                             req,
                             state.app_state.clone(),
                             state.handler.clone(),
-                        );
+                        )
+                        .await;
                         break reason;
                     }
 
@@ -130,9 +133,9 @@ pub async fn echo_heartbeat_ws<
     let _ = session.close(reason).await;
 }
 
-fn jambonz_handler<
+async fn jambonz_handler<
     T: 'static + Clone,
-    F: Fn(Uuid, Session, JambonzRequest, T),
+    F: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()>>>,
 >(
     uuid: Uuid,
     session: Session,
@@ -140,5 +143,5 @@ fn jambonz_handler<
     app_state: T,
     f: F,
 ) {
-    f(uuid, session, request, app_state);
+    f(uuid, session, request, app_state).await;
 }
