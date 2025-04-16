@@ -85,9 +85,7 @@ impl<T: Send + Sync + 'static + Clone> JambonzWebServer<T> {
                 app_state: self.app_state.clone(),
                 handler: self.handler.clone(),
             });
-            env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
             App::new()
-                .wrap(Logger::new("%a %{User-Agent}i"))
                 .app_data(state)
                 .service(resource(self.ws_path.clone()).route(web::get().to(handle_ws::<T>)))
                 .service(
