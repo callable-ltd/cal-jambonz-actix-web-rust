@@ -91,10 +91,10 @@ impl<T: Send + Sync + 'static + Clone> JambonzWebServer<T> {
                     println!("test");
                     HttpResponse::Ok()
                 })))
-                .service(resource(self.ws_path.clone()).route(web::get().to(handle_ws::<T>)))
-                .service(
-                    resource(self.record_path.clone()).route(web::get().to(handle_record::<T>)),
-                )
+                .route(self.ws_path.clone().as_str(), web::get().to(handle_ws::<T>))
+                // .service(
+                //     resource(self.record_path.clone()).route(web::get().to(handle_record::<T>)),
+                // )
         })
         .bind((self.bind_ip, self.bind_port))
         .expect("Can not bind to server/port")
