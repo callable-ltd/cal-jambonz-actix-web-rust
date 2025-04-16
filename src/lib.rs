@@ -8,32 +8,31 @@ use actix_ws::Session;
 use cal_jambonz::ws::WebsocketRequest;
 use uuid::Uuid;
 
-async fn handle_ws<T: 'static + Clone, U: Fn(Uuid, Session, JambonzRequest, Data<T>) + 'static>(
+async fn handle_ws<T: 'static + Clone>(
     req: HttpRequest,
     stream: Payload,
     state: Data<T>,
-    handler: Data<U>,
+    handler:  Data<dyn Fn(Uuid, Session, JambonzRequest, Data<T>)>,
 ) -> Result<HttpResponse, Error> {
     ws_response(&req, stream, state, handler, "ws.jambonz.org")
 }
 
 async fn handle_record<
-    T: 'static + Clone,
-    U: Fn(Uuid, Session, JambonzRequest, Data<T>) + 'static,
+    T: 'static + Clone
 >(
     req: HttpRequest,
     stream: Payload,
     state: Data<T>,
-    handler: Data<U>,
+    handler: Data<dyn Fn(Uuid, Session, JambonzRequest, Data<T>)>,
 ) -> Result<HttpResponse, Error> {
     ws_response(&req, stream, state, handler, "audio.jambonz.org")
 }
 
-fn ws_response<T: 'static + Clone, U: Fn(Uuid, Session, JambonzRequest, Data<T>) + 'static>(
+fn ws_response<T: 'static + Clone>(
     req: &HttpRequest,
     stream: Payload,
     state: Data<T>,
-    handler: Data<U>,
+    handler: Data<dyn Fn(Uuid, Session, JambonzRequest, Data<T>)>,
     protocol: &str,
 ) -> Result<HttpResponse, Error> {
     let result = actix_ws::handle(&req, stream)?;
@@ -70,12 +69,9 @@ pub struct JambonzWebServer<T> {
     pub record_path: String,
 }
 
-pub fn start_jambonz_server<
-    T: Clone + Send + 'static,
-    U: Future + Fn(Uuid, Session, JambonzRequest, Data<T>) + 'static,
->(
+pub fn start_jambonz_server<T: Clone + Send + 'static>(
     server: JambonzWebServer<T>,
-    handler: fn(Uuid, Session, JambonzRequest, T) -> U,
+    handler: fn(Uuid, Session, JambonzRequest, Data<T>),
 ) -> Server {
     HttpServer::new(move || {
         let d1 = Data::new(handler);
@@ -86,11 +82,11 @@ pub fn start_jambonz_server<
             .app_data(d2)
             .route(
                 server.ws_path.clone().as_str(),
-                web::get().to(handle_ws::<T, U>),
+                web::get().to(handle_ws::<T>),
             )
             .route(
                 server.record_path.clone().as_str(),
-                web::get().to(handle_record::<T, U>),
+                web::get().to(handle_record::<T>),
             )
     })
     .bind((server.bind_ip, server.bind_port))

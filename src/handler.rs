@@ -17,11 +17,11 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 /// How long before lack of client response causes a timeout.
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub async fn echo_heartbeat_ws<T: 'static + Clone, U: Fn(Uuid, Session, JambonzRequest, Data<T>)>(
+pub async fn echo_heartbeat_ws<T: 'static + Clone>(
     mut session: Session,
     mut msg_stream: actix_ws::MessageStream,
     state: Data<T>,
-    handler: Data<U>,
+    handler: Data<dyn Fn(Uuid, Session, JambonzRequest, Data<T>)>,
 ) {
     let uuid = Uuid::new_v4();
     println!("Handler:new_session: {}", uuid.to_string());
@@ -118,12 +118,12 @@ pub async fn echo_heartbeat_ws<T: 'static + Clone, U: Fn(Uuid, Session, JambonzR
     let _ = session.close(reason).await;
 }
 
-async fn jambonz_handler<T: 'static + Clone, F: Fn(Uuid, Session, JambonzRequest, Data<T>)>(
+async fn jambonz_handler<T: 'static + Clone>(
     uuid: Uuid,
     session: Session,
     request: JambonzRequest,
     app_state: Data<T>,
-    f: Data<F>,
+    f: Data<dyn Fn(Uuid, Session, JambonzRequest, Data<T>)>,
 ) {
     f(uuid, session, request, app_state);
 }
