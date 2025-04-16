@@ -8,12 +8,13 @@ use actix_ws::Session;
 use cal_jambonz::ws::WebsocketRequest;
 use uuid::Uuid;
 
-async fn handle_ws<T: 'static + Clone>(
+async fn handle_ws<T: 'static + Clone + serde::ser::Serialize>(
     req: HttpRequest,
     stream: Payload,
     state: Data<T>,
     handler:  Data<dyn Fn(Uuid, Session, JambonzRequest, Data<T>)>,
 ) -> Result<HttpResponse, Error> {
+    println!("{:?}", serde_json::to_string(&state.clone())?);
     ws_response(&req, stream, state, handler, "ws.jambonz.org")
 }
 
@@ -69,7 +70,7 @@ pub struct JambonzWebServer<T> {
     pub record_path: String,
 }
 
-pub fn start_jambonz_server<T: Clone + Send + 'static>(
+pub fn start_jambonz_server<T: Clone + Send + 'static + serde::Serialize>(
     server: JambonzWebServer<T>,
     handler: fn(Uuid, Session, JambonzRequest, Data<T>),
 ) -> Server {
