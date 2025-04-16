@@ -347,7 +347,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cal_jambonz-actix-web"
+name = "cal-jambonz-actix-web"
 version = "0.1.0"
 dependencies = [
  "actix-web",
