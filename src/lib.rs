@@ -63,14 +63,13 @@ fn ws_response<T: 'static + Clone>(
     }
 }
 
-pub fn start_jambonz_server<T>(server: JambonzWebServer<T>, handler: HandlerFn<T>) -> Server
+fn start_jambonz_server<T>(server: JambonzWebServer<T>) -> Server
 where
     T: Clone + Send + 'static,
 {
     let state = JambonzState {
-        message: "Hello".to_string(),
         state: server.app_state.clone(),
-        handler: handler.clone(),
+        handler: server.handler.clone(),
     };
 
     HttpServer::new(move || {
@@ -94,7 +93,6 @@ where
 
 #[derive(Clone)]
 pub struct JambonzState<T> {
-    pub message: String,
     pub state: T,
     pub handler: HandlerFn<T>,
 }
@@ -111,12 +109,17 @@ pub struct JambonzWebServer<T> {
     pub app_state: T,
     pub ws_path: String,
     pub record_path: String,
+    pub handler: HandlerFn<T>,
 }
 
-impl<T> JambonzWebServer<T> {
-    pub fn new(app_state: T) -> Self {
+impl<T: Clone + Send + 'static> JambonzWebServer<T> {
+    pub fn new(app_state: T, handler: HandlerFn<T>) -> Self
+    where
+        T: Clone + Send + 'static,
+    {
         JambonzWebServer {
             app_state,
+            handler,
             bind_ip: "0.0.0.0".to_string(),
             bind_port: 8080,
             ws_path: "/ws".to_string(),
@@ -142,6 +145,10 @@ impl<T> JambonzWebServer<T> {
     pub fn with_record_path(mut self, path: impl Into<String>) -> Self {
         self.record_path = path.into();
         self
+    }
+
+    pub async fn start(self) -> Server {
+        start_jambonz_server(self)
     }
 }
 
