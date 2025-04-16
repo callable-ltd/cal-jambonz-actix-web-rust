@@ -3,58 +3,108 @@ mod handler;
 use actix_web::dev::Server;
 use actix_web::http::header::{HeaderName, HeaderValue};
 use actix_web::web::{Data, Payload};
-use actix_web::{rt, web, App, Error, HttpRequest, HttpResponse, HttpServer};
+use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, rt, web};
 use actix_ws::Session;
 use cal_jambonz::ws::WebsocketRequest;
+use std::pin::Pin;
+use std::sync::Arc;
 use uuid::Uuid;
 
-async fn handle_ws<T: 'static + Clone + serde::ser::Serialize>(
-    req: HttpRequest,
-    stream: Payload,
-    state: Data<T>,
-    handler:  Data<dyn Fn(Uuid, Session, JambonzRequest, Data<T>)>,
-) -> Result<HttpResponse, Error> {
-    println!("{:?}", serde_json::to_string(&state.clone())?);
-    ws_response(&req, stream, state, handler, "ws.jambonz.org")
+pub type HandlerFn<T> = Arc<
+    dyn Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
+
+pub fn register_handler<T, F>(handler: F) -> HandlerFn<T>
+where
+    T: Clone + Send + 'static, // T must be Clone and Send to be passed between threads
+    F: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send>>
+        + Send
+        + Sync
+        + 'static,
+{
+    Arc::new(handler)
 }
 
-async fn handle_record<
-    T: 'static + Clone
->(
+async fn handle_record<T: 'static + Clone>(
     req: HttpRequest,
     stream: Payload,
-    state: Data<T>,
-    handler: Data<dyn Fn(Uuid, Session, JambonzRequest, Data<T>)>,
+    state: Data<JambonzState<T>>,
 ) -> Result<HttpResponse, Error> {
-    ws_response(&req, stream, state, handler, "audio.jambonz.org")
+    ws_response(&req, stream, state, "audio.jambonz.org")
+}
+
+async fn handle_ws<T: 'static + Clone>(
+    req: HttpRequest,
+    stream: Payload,
+    state: Data<JambonzState<T>>,
+) -> Result<HttpResponse, Error> {
+    ws_response(&req, stream, state, "ws.jambonz.org")
 }
 
 fn ws_response<T: 'static + Clone>(
     req: &HttpRequest,
     stream: Payload,
-    state: Data<T>,
-    handler: Data<dyn Fn(Uuid, Session, JambonzRequest, Data<T>)>,
+    state: Data<JambonzState<T>>,
     protocol: &str,
 ) -> Result<HttpResponse, Error> {
-    let result = actix_ws::handle(&req, stream)?;
-    let (mut res, session, msg_stream) = result;
-
-    rt::spawn(handler::echo_heartbeat_ws(
-        session,
-        msg_stream,
-        state.clone(),
-        handler.clone(),
-    ));
-
-    let ws_header = HeaderName::from_bytes("Sec-WebSocket-Protocol".to_string().as_bytes())
-        .expect("should be valid WebSocket-Protocol");
-
-    res.headers_mut().insert(
-        ws_header.clone(),
-        HeaderValue::from_bytes(protocol.as_bytes()).expect("Could not parse protocol header"),
-    );
-    Ok(res)
+    match actix_ws::handle(req, stream) {
+        Ok(res) => {
+            let (mut res, session, msg_stream) = res;
+            rt::spawn(handler::handler(session, msg_stream, state));
+            let ws_header = HeaderName::from_bytes("Sec-WebSocket-Protocol".to_string().as_bytes())
+                .expect("should be valid WebSocket-Protocol");
+            res.headers_mut().insert(
+                ws_header.clone(),
+                HeaderValue::from_bytes(protocol.as_bytes())?,
+            );
+            Ok(res)
+        }
+        Err(e) => {
+            println!("{:?}", e);
+            Ok(HttpResponse::InternalServerError().finish())
+        }
+    }
 }
+
+
+pub fn start_jambonz_server<T>(server: JambonzWebServer<T>, handler: HandlerFn<T>) -> Server
+where
+    T: Clone + Send + 'static,
+{
+    let state = JambonzState {
+        message: "Hello".to_string(),
+        state: server.app_state.clone(),
+        handler: handler.clone(),
+    };
+
+    HttpServer::new(move || {
+        let d1 = Data::new(state.clone());
+
+        App::new()
+            .app_data(d1)
+            .route(
+                server.ws_path.clone().as_str(),
+                web::get().to(handle_ws::<T>),
+            )
+            .route(
+                server.record_path.clone().as_str(),
+                web::get().to(handle_record::<T>),
+            )
+    })
+    .bind((server.bind_ip, server.bind_port))
+    .expect("Can not bind to server/port")
+    .run()
+}
+
+#[derive(Clone)]
+pub struct JambonzState<T> {
+    pub message: String,
+    pub state: T,
+    pub handler: HandlerFn<T>,
+}
+
 
 pub enum JambonzRequest {
     TextMessage(WebsocketRequest),
@@ -68,29 +118,4 @@ pub struct JambonzWebServer<T> {
     pub app_state: T,
     pub ws_path: String,
     pub record_path: String,
-}
-
-pub fn start_jambonz_server<T: Clone + Send + 'static + serde::Serialize>(
-    server: JambonzWebServer<T>,
-    handler: fn(Uuid, Session, JambonzRequest, Data<T>),
-) -> Server {
-    HttpServer::new(move || {
-        let d1 = Data::new(handler);
-        let d2 = Data::new(server.app_state.clone());
-
-        App::new()
-            .app_data(d1)
-            .app_data(d2)
-            .route(
-                server.ws_path.clone().as_str(),
-                web::get().to(handle_ws::<T>),
-            )
-            .route(
-                server.record_path.clone().as_str(),
-                web::get().to(handle_record::<T>),
-            )
-    })
-    .bind((server.bind_ip, server.bind_port))
-    .expect("Can not bind to server/port")
-    .run()
 }

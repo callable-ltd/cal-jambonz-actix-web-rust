@@ -1,4 +1,4 @@
-use crate::JambonzRequest;
+use crate::{HandlerFn, JambonzRequest, JambonzState};
 use actix_web::web::Data;
 use actix_ws::{Message, Session};
 use futures_util::{
@@ -17,11 +17,10 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 /// How long before lack of client response causes a timeout.
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub async fn echo_heartbeat_ws<T: 'static + Clone>(
+pub async fn handler<T: 'static + Clone>(
     mut session: Session,
     mut msg_stream: actix_ws::MessageStream,
-    state: Data<T>,
-    handler: Data<dyn Fn(Uuid, Session, JambonzRequest, Data<T>)>,
+    state: Data<JambonzState<T>>,
 ) {
     let uuid = Uuid::new_v4();
     println!("Handler:new_session: {}", uuid.to_string());
@@ -49,9 +48,9 @@ pub async fn echo_heartbeat_ws<T: 'static + Clone>(
                                 session.clone(),
                                 req,
                                 state.clone(),
-                                handler.clone(),
+                                state.handler.clone(),
                             )
-                            .await;
+                                .await;
                         }
                         Err(e) => {
                             println!("Error reading TextMessage: {}", e);
@@ -60,13 +59,25 @@ pub async fn echo_heartbeat_ws<T: 'static + Clone>(
 
                     Message::Binary(bytes) => {
                         let req = JambonzRequest::Binary(bytes.into_iter().collect::<Vec<_>>());
-                        jambonz_handler(uuid, session.clone(), req, state.clone(), handler.clone())
+                        jambonz_handler(
+                            uuid,
+                            session.clone(),
+                            req,
+                            state.clone(),
+                            state.handler.clone(),
+                        )
                             .await;
                     }
 
                     Message::Close(reason) => {
                         let req = JambonzRequest::Close;
-                        jambonz_handler(uuid, session.clone(), req, state.clone(), handler.clone())
+                        jambonz_handler(
+                            uuid,
+                            session.clone(),
+                            req,
+                            state.clone(),
+                            state.handler.clone(),
+                        )
                             .await;
                         break reason;
                     }
@@ -122,8 +133,8 @@ async fn jambonz_handler<T: 'static + Clone>(
     uuid: Uuid,
     session: Session,
     request: JambonzRequest,
-    app_state: Data<T>,
-    f: Data<dyn Fn(Uuid, Session, JambonzRequest, Data<T>)>,
+    state: Data<JambonzState<T>>,
+    f: HandlerFn<T>,
 ) {
-    f(uuid, session, request, app_state);
+    f(uuid, session, request, state.state.clone()).await;
 }
