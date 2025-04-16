@@ -1,9 +1,9 @@
 mod handler;
 
-use actix_web::dev::Server;
 use actix_web::http::header::{HeaderName, HeaderValue};
 use actix_web::web::{Data, Payload, resource};
-use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, middleware, rt, web};
+use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, rt, web};
+use actix_web::{middleware::Logger};
 use actix_ws::Session;
 use cal_jambonz::ws::WebsocketRequest;
 use uuid::Uuid;
@@ -85,8 +85,9 @@ impl<T: Send + Sync + 'static + Clone> JambonzWebServer<T> {
                 app_state: self.app_state.clone(),
                 handler: self.handler.clone(),
             });
+            env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
             App::new()
-                .wrap(middleware::Logger::default())
+                .wrap(Logger::new("%a %{User-Agent}i"))
                 .app_data(state)
                 .service(resource(self.ws_path.clone()).route(web::get().to(handle_ws::<T>)))
                 .service(
