@@ -114,7 +114,7 @@ pub struct JambonzWebServer<T> {
 }
 
 impl<T> JambonzWebServer<T> {
-    fn new(app_state: T) -> Self {
+    pub fn new(app_state: T) -> Self {
         JambonzWebServer {
             app_state,
             bind_ip: "0.0.0.0".to_string(),
@@ -124,22 +124,22 @@ impl<T> JambonzWebServer<T> {
         }
     }
 
-    pub fn bind_ip(mut self, ip: impl Into<String>) -> Self {
+    pub fn with_bind_ip(mut self, ip: impl Into<String>) -> Self {
         self.bind_ip = ip.into();
         self
     }
 
-    pub fn bind_port(mut self, port: u16) -> Self {
+    pub fn with_bind_port(mut self, port: u16) -> Self {
         self.bind_port = port;
         self
     }
 
-    pub fn ws_path(mut self, path: impl Into<String>) -> Self {
+    pub fn with_ws_path(mut self, path: impl Into<String>) -> Self {
         self.ws_path = path.into();
         self
     }
 
-    pub fn record_path(mut self, path: impl Into<String>) -> Self {
+    pub fn with_record_path(mut self, path: impl Into<String>) -> Self {
         self.record_path = path.into();
         self
     }
