@@ -2,45 +2,47 @@ mod handler;
 
 use actix_web::dev::Server;
 use actix_web::http::header::{HeaderName, HeaderValue};
-use actix_web::middleware::Logger;
-use actix_web::web::{Data, Payload, resource};
+use actix_web::web::{Data, Payload};
 use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, rt, web};
-use actix_ws::{AggregatedMessage, Session};
+use actix_ws::Session;
 use cal_jambonz::ws::WebsocketRequest;
-use futures_util::StreamExt;
+use std::pin::Pin;
 use uuid::Uuid;
 
-fn jambonz_handler<T, F: Fn(Uuid, Session, JambonzRequest, T)>(
-    uuid: Uuid,
-    session: Session,
-    request: JambonzRequest,
-    app_state: T,
-    f: F,
-) {
-    f(uuid, session, request, app_state);
-}
 
-async fn handle_ws<T: 'static + Clone>(
+
+async fn handle_ws<
+    T: 'static + Clone,
+    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+        + Clone + 'static,
+>(
     req: HttpRequest,
     stream: Payload,
-    state: Data<JambonzState<T>>,
+    state: Data<JambonzState<T, U>>,
 ) -> Result<HttpResponse, Error> {
-    println!("handle_ws");
     ws_response(&req, stream, state, "ws.jambonz.org")
 }
 
-async fn handle_record<T: 'static + Clone>(
+async fn handle_record<
+    T: 'static + Clone,
+    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+        + Clone + 'static,
+>(
     req: HttpRequest,
     stream: Payload,
-    state: Data<JambonzState<T>>,
+    state: Data<JambonzState<T, U>>,
 ) -> Result<HttpResponse, Error> {
     ws_response(&req, stream, state, "audio.jambonz.org")
 }
 
-fn ws_response<T: 'static + Clone>(
+fn ws_response<
+    T: 'static + Clone,
+    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+        + Clone + 'static,
+>(
     req: &HttpRequest,
     stream: Payload,
-    state: Data<JambonzState<T>>,
+    state: Data<JambonzState<T, U>>,
     protocol: &str,
 ) -> Result<HttpResponse, Error> {
     let result = actix_ws::handle(&req, stream)?;
@@ -66,59 +68,36 @@ pub enum JambonzRequest {
     Close,
 }
 
-pub struct JambonzWebServer<T> {
+pub struct JambonzWebServer<T, U>
+where
+    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>,
+{
     pub bind_ip: String,
     pub bind_port: u16,
     pub app_state: T,
     pub ws_path: String,
     pub record_path: String,
-    pub handler: fn(Uuid, Session, JambonzRequest, T),
+    pub handler: U,
 }
 
 #[derive(Clone)]
-pub struct JambonzState<T> {
+pub struct JambonzState<T, U>
+where
+    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>,
+{
     pub app_state: T,
-    pub handler: fn(Uuid, Session, JambonzRequest, T),
+    pub handler: U,
 }
 
-async fn echo(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, Error> {
-    let (res, mut session, stream) = actix_ws::handle(&req, stream)?;
-
-    let mut stream = stream
-        .aggregate_continuations()
-        // aggregate continuation frames up to 1MiB
-        .max_continuation_size(2_usize.pow(20));
-
-    // start task but don't wait for it
-    rt::spawn(async move {
-        // receive messages from websocket
-        while let Some(msg) = stream.next().await {
-            match msg {
-                Ok(AggregatedMessage::Text(text)) => {
-                    // echo text message
-                    session.text(text).await.unwrap();
-                }
-
-                Ok(AggregatedMessage::Binary(bin)) => {
-                    // echo binary message
-                    session.binary(bin).await.unwrap();
-                }
-
-                Ok(AggregatedMessage::Ping(msg)) => {
-                    // respond to PING frame with PONG frame
-                    session.pong(&msg).await.unwrap();
-                }
-
-                _ => {}
-            }
-        }
-    });
-
-    // respond immediately with response connected to WS session
-    Ok(res)
-}
-
-pub fn start_jambonz_server<T: Clone + Send + 'static>(server: JambonzWebServer<T>) -> Server {
+pub fn start_jambonz_server<
+    T: Clone + Send + 'static,
+    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+        + Clone
+        + Send
+        + 'static,
+>(
+    server: JambonzWebServer<T, U>,
+) -> Server {
     HttpServer::new(move || {
         let state = Data::new(JambonzState {
             app_state: server.app_state.clone(),
@@ -126,10 +105,14 @@ pub fn start_jambonz_server<T: Clone + Send + 'static>(server: JambonzWebServer<
         });
         App::new()
             .app_data(state)
-            .route(server.ws_path.clone().as_str(), web::get().to(handle_ws::<T>))
-        // .service(
-        //     resource(self.record_path.clone()).route(web::get().to(handle_record::<T>)),
-        // )
+            .route(
+                server.ws_path.clone().as_str(),
+                web::get().to(handle_ws::<T, U>),
+            )
+            .route(
+                server.record_path.clone().as_str(),
+                web::get().to(handle_record::<T, U>),
+            )
     })
     .bind((server.bind_ip, server.bind_port))
     .expect("Can not bind to server/port")

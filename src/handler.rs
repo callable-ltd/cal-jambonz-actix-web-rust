@@ -1,10 +1,11 @@
-use crate::{JambonzRequest, JambonzState, jambonz_handler};
+use crate::{JambonzRequest, JambonzState};
 use actix_web::web::Data;
 use actix_ws::{Message, Session};
 use futures_util::{
-    StreamExt as _,
     future::{self, Either},
+    StreamExt as _,
 };
+use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio::{pin, time::interval};
 use uuid::Uuid;
@@ -17,10 +18,14 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 /// How long before lack of client response causes a timeout.
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
-pub async fn echo_heartbeat_ws<T: Clone>(
+pub async fn echo_heartbeat_ws<
+    T: 'static + Clone,
+    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+        + Clone,
+>(
     mut session: Session,
     mut msg_stream: actix_ws::MessageStream,
-    state: Data<JambonzState<T>>,
+    state: Data<JambonzState<T, U>>,
 ) {
     let uuid = Uuid::new_v4();
     println!("Handler:new_session: {}", uuid.to_string());
@@ -43,12 +48,12 @@ pub async fn echo_heartbeat_ws<T: Clone>(
                     Message::Text(text) => match serde_json::from_str(&text) {
                         Ok(json) => {
                             let req = JambonzRequest::TextMessage(json);
-                            let _ = jambonz_handler(
+                            jambonz_handler(
                                 uuid,
                                 session.clone(),
                                 req,
                                 state.app_state.clone(),
-                                state.handler,
+                                state.handler.clone(),
                             );
                         }
                         Err(e) => {
@@ -63,7 +68,7 @@ pub async fn echo_heartbeat_ws<T: Clone>(
                             session.clone(),
                             req,
                             state.app_state.clone(),
-                            state.handler,
+                            state.handler.clone(),
                         );
                     }
 
@@ -74,7 +79,7 @@ pub async fn echo_heartbeat_ws<T: Clone>(
                             session.clone(),
                             req,
                             state.app_state.clone(),
-                            state.handler,
+                            state.handler.clone(),
                         );
                         break reason;
                     }
@@ -124,4 +129,17 @@ pub async fn echo_heartbeat_ws<T: Clone>(
 
     // attempt to close connection gracefully
     let _ = session.close(reason).await;
+}
+
+fn jambonz_handler<
+    T: 'static + Clone,
+    F: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>,
+>(
+    uuid: Uuid,
+    session: Session,
+    request: JambonzRequest,
+    app_state: T,
+    f: F,
+) {
+    f(uuid, session, request, app_state);
 }
