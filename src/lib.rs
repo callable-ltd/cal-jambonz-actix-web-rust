@@ -87,6 +87,10 @@ impl<T: Send + Sync + 'static + Clone> JambonzWebServer<T> {
             });
             App::new()
                 .app_data(state)
+                .service(resource("/test").route(web::get().to(|| {
+                    println!("test");
+                    HttpResponse::Ok()
+                })))
                 .service(resource(self.ws_path.clone()).route(web::get().to(handle_ws::<T>)))
                 .service(
                     resource(self.record_path.clone()).route(web::get().to(handle_record::<T>)),
