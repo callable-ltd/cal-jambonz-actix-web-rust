@@ -10,9 +10,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub type HandlerFn<T> = Arc<
-    dyn Fn(HandlerContext<T>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync,
->;
+pub type HandlerFn<T> =
+    Arc<dyn Fn(HandlerContext<T>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 pub fn register_handler<T, F, Fut>(handler: F) -> HandlerFn<T>
 where
@@ -20,9 +19,7 @@ where
     F: Fn(HandlerContext<T>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
 {
-    Arc::new(move |ctx: HandlerContext<T>| {
-        Box::pin(handler(ctx))
-    })
+    Arc::new(move |ctx: HandlerContext<T>| Box::pin(handler(ctx)))
 }
 
 async fn handle_record<T: 'static + Clone>(
@@ -66,7 +63,6 @@ fn ws_response<T: 'static + Clone>(
     }
 }
 
-
 pub fn start_jambonz_server<T>(server: JambonzWebServer<T>, handler: HandlerFn<T>) -> Server
 where
     T: Clone + Send + 'static,
@@ -103,7 +99,6 @@ pub struct JambonzState<T> {
     pub handler: HandlerFn<T>,
 }
 
-
 pub enum JambonzRequest {
     TextMessage(WebsocketRequest),
     Binary(Vec<u8>),
@@ -116,6 +111,38 @@ pub struct JambonzWebServer<T> {
     pub app_state: T,
     pub ws_path: String,
     pub record_path: String,
+}
+
+impl<T> JambonzWebServer<T> {
+    fn new(app_state: T) -> Self {
+        JambonzWebServer {
+            app_state,
+            bind_ip: "0.0.0.0".to_string(),
+            bind_port: 8080,
+            ws_path: "/ws".to_string(),
+            record_path: "/record".to_string(),
+        }
+    }
+
+    pub fn bind_ip(mut self, ip: impl Into<String>) -> Self {
+        self.bind_ip = ip.into();
+        self
+    }
+
+    pub fn bind_port(mut self, port: u16) -> Self {
+        self.bind_port = port;
+        self
+    }
+
+    pub fn ws_path(mut self, path: impl Into<String>) -> Self {
+        self.ws_path = path.into();
+        self
+    }
+
+    pub fn record_path(mut self, path: impl Into<String>) -> Self {
+        self.record_path = path.into();
+        self
+    }
 }
 
 pub struct HandlerContext<T> {
