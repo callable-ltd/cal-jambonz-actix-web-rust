@@ -9,8 +9,6 @@ use cal_jambonz::ws::WebsocketRequest;
 use std::pin::Pin;
 use uuid::Uuid;
 
-
-
 async fn handle_ws<
     T: 'static + Clone,
     U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
