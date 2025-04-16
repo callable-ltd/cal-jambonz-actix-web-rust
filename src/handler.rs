@@ -5,7 +5,6 @@ use futures_util::{
     future::{self, Either},
     StreamExt as _,
 };
-use std::pin::Pin;
 use std::time::{Duration, Instant};
 use tokio::{pin, time::interval};
 use uuid::Uuid;
@@ -20,7 +19,7 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub async fn echo_heartbeat_ws<
     T: 'static + Clone,
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+    U: Fn(Uuid, Session, JambonzRequest, T)
         + Clone,
 >(
     mut session: Session,
@@ -133,7 +132,7 @@ pub async fn echo_heartbeat_ws<
 
 fn jambonz_handler<
     T: 'static + Clone,
-    F: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>,
+    F: Fn(Uuid, Session, JambonzRequest, T),
 >(
     uuid: Uuid,
     session: Session,

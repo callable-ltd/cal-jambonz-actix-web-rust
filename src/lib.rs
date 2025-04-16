@@ -3,17 +3,12 @@ mod handler;
 use actix_web::dev::Server;
 use actix_web::http::header::{HeaderName, HeaderValue};
 use actix_web::web::{Data, Payload};
-use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, rt, web};
+use actix_web::{rt, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_ws::Session;
 use cal_jambonz::ws::WebsocketRequest;
-use std::pin::Pin;
 use uuid::Uuid;
 
-async fn handle_ws<
-    T: 'static + Clone,
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
-        + Clone + 'static,
->(
+async fn handle_ws<T: 'static + Clone, U: Fn(Uuid, Session, JambonzRequest, T) + Clone + 'static>(
     req: HttpRequest,
     stream: Payload,
     state: Data<JambonzState<T, U>>,
@@ -23,8 +18,7 @@ async fn handle_ws<
 
 async fn handle_record<
     T: 'static + Clone,
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
-        + Clone + 'static,
+    U: Fn(Uuid, Session, JambonzRequest, T) + Clone + 'static,
 >(
     req: HttpRequest,
     stream: Payload,
@@ -33,11 +27,7 @@ async fn handle_record<
     ws_response(&req, stream, state, "audio.jambonz.org")
 }
 
-fn ws_response<
-    T: 'static + Clone,
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
-        + Clone + 'static,
->(
+fn ws_response<T: 'static + Clone, U: Fn(Uuid, Session, JambonzRequest, T) + Clone + 'static>(
     req: &HttpRequest,
     stream: Payload,
     state: Data<JambonzState<T, U>>,
@@ -68,7 +58,7 @@ pub enum JambonzRequest {
 
 pub struct JambonzWebServer<T, U>
 where
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>,
+    U: Fn(Uuid, Session, JambonzRequest, T),
 {
     pub bind_ip: String,
     pub bind_port: u16,
@@ -81,7 +71,7 @@ where
 #[derive(Clone)]
 pub struct JambonzState<T, U>
 where
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>,
+    U: Fn(Uuid, Session, JambonzRequest, T),
 {
     pub app_state: T,
     pub handler: U,
@@ -89,10 +79,7 @@ where
 
 pub fn start_jambonz_server<
     T: Clone + Send + 'static,
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
-        + Clone
-        + Send
-        + 'static,
+    U: Fn(Uuid, Session, JambonzRequest, T) + Clone + Send + 'static,
 >(
     server: JambonzWebServer<T, U>,
 ) -> Server {
