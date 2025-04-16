@@ -3,15 +3,25 @@ mod handler;
 use actix_web::dev::Server;
 use actix_web::http::header::{HeaderName, HeaderValue};
 use actix_web::web::{Data, Payload};
-use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, rt, web};
+use actix_web::{rt, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_ws::Session;
 use cal_jambonz::ws::WebsocketRequest;
 use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub type HandlerFn<T> =
+type HandlerFn<T> =
     Arc<dyn Fn(HandlerContext<T>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+
+type WsHandler<T> = Arc<
+    dyn Fn(
+            HttpRequest,
+            Payload,
+            Data<T>,
+        ) -> Pin<Box<dyn Future<Output = Result<HttpResponse, Error>> + Send>>
+        + Send
+        + Sync,
+>;
 
 pub fn register_handler<T, F, Fut>(handler: F) -> HandlerFn<T>
 where
@@ -22,79 +32,100 @@ where
     Arc::new(move |ctx: HandlerContext<T>| Box::pin(handler(ctx)))
 }
 
-async fn handle_record<T: 'static + Clone>(
+// async fn handle_record<T: 'static + Clone>(
+//     req: HttpRequest,
+//     stream: Payload,
+//     state: Data<JambonzState<T>>,
+// ) -> Result<HttpResponse, Error> {
+//     ws_response(&req, stream, state, "audio.jambonz.org")
+// }
+
+async fn handle_ws<T: Clone + Send + Sync + 'static>(
     req: HttpRequest,
     stream: Payload,
-    state: Data<JambonzState<T>>,
+    state: Data<T>,
+    route: Route<T>,
 ) -> Result<HttpResponse, Error> {
-    ws_response(&req, stream, state, "audio.jambonz.org")
+    let protocol = match route.ws_type {
+        WebsocketType::Hook => "ws.jambonz.org",
+        WebsocketType::Recording => "audio.jambonz.org"
+    };
+    ws_response(&req, stream, state, protocol, route.handler.into()).await
 }
 
-async fn handle_ws<T: 'static + Clone>(
-    req: HttpRequest,
-    stream: Payload,
-    state: Data<JambonzState<T>>,
-) -> Result<HttpResponse, Error> {
-    ws_response(&req, stream, state, "ws.jambonz.org")
+#[derive(Clone)]
+struct Route<T> {
+    pub path: String,
+    pub ws_type: WebsocketType,
+    pub handler: Arc<dyn Fn(HandlerContext<T>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>,
 }
 
-fn ws_response<T: 'static + Clone>(
+#[derive(Clone)]
+pub enum WebsocketType {
+    Hook,
+    Recording,
+}
+
+async fn ws_response<T: Clone + 'static>(
     req: &HttpRequest,
     stream: Payload,
-    state: Data<JambonzState<T>>,
+    state: Data<T>,
     protocol: &str,
+    handler: Arc<HandlerFn<T>>,
 ) -> Result<HttpResponse, Error> {
     match actix_ws::handle(req, stream) {
-        Ok(res) => {
-            let (mut res, session, msg_stream) = res;
-            rt::spawn(handler::handler(session, msg_stream, state));
-            let ws_header = HeaderName::from_bytes("Sec-WebSocket-Protocol".to_string().as_bytes())
-                .expect("should be valid WebSocket-Protocol");
+        Ok((mut res, session, msg_stream)) => {
             res.headers_mut().insert(
-                ws_header.clone(),
-                HeaderValue::from_bytes(protocol.as_bytes())?,
+                HeaderName::from_static("sec-websocket-protocol"),
+                HeaderValue::from_str(protocol).expect("valid header value"),
             );
+            rt::spawn(handler::handler(session, msg_stream, state, handler));
             Ok(res)
         }
         Err(e) => {
-            println!("{:?}", e);
+            println!("WebSocket error: {:?}", e);
             Ok(HttpResponse::InternalServerError().finish())
         }
     }
 }
 
-fn start_jambonz_server<T>(server: JambonzWebServer<T>) -> Server
+pub fn start_server<T>(server: JambonzWebServer<T>) -> Server
 where
-    T: Clone + Send + 'static,
+    T: Clone + Send + Sync + 'static,
 {
-    let state = JambonzState {
-        state: server.app_state.clone(),
-        handler: server.handler.clone(),
-    };
+    // Wrap routes in an Arc to share it safely across threads
+    let routes_arc = Arc::new(server.routes.clone());
 
     HttpServer::new(move || {
-        let d1 = Data::new(state.clone());
+        let mut app = App::new().app_data(Data::new(server.app_state.clone()));
 
-        App::new()
-            .app_data(d1)
-            .route(
-                server.ws_path.clone().as_str(),
-                web::get().to(handle_ws::<T>),
-            )
-            .route(
-                server.record_path.clone().as_str(),
-                web::get().to(handle_record::<T>),
-            )
+        // Clone the Arc for each worker
+        let routes_arc = Arc::clone(&routes_arc);
+
+        // For each route, create a handler
+        for route in routes_arc.iter() { // Use iter() to iterate over the Arc's content
+            let path = route.path.clone();
+
+            // Clone the entire route for use in the closure
+            let route_clone = route.clone();
+
+            // Create handler function with captured route clone
+            let handler_fn = move |req, stream, state| {
+                let route_clone = route_clone.clone(); // Clone again for the inner closure
+                async move {
+                    handle_ws(req, stream, state, route_clone).await
+                }
+            };
+
+            // Register route
+            app = app.route(&path, web::get().to(handler_fn));
+        }
+
+        app
     })
-    .bind((server.bind_ip, server.bind_port))
-    .expect("Can not bind to server/port")
-    .run()
-}
-
-#[derive(Clone)]
-pub struct JambonzState<T> {
-    pub state: T,
-    pub handler: HandlerFn<T>,
+        .bind((server.bind_ip.clone(), server.bind_port))
+        .expect("Can not bind to port")
+        .run()
 }
 
 pub enum JambonzRequest {
@@ -107,23 +138,19 @@ pub struct JambonzWebServer<T> {
     pub bind_ip: String,
     pub bind_port: u16,
     pub app_state: T,
-    pub ws_path: String,
-    pub record_path: String,
-    pub handler: HandlerFn<T>,
+    pub routes: Vec<Route<T>>,
 }
 
-impl<T: Clone + Send + 'static> JambonzWebServer<T> {
-    pub fn new(app_state: T, handler: HandlerFn<T>) -> Self
+impl<T: Clone + Send + 'static + Sync> JambonzWebServer<T> {
+    pub fn new(app_state: T) -> Self
     where
         T: Clone + Send + 'static,
     {
         JambonzWebServer {
             app_state,
-            handler,
             bind_ip: "0.0.0.0".to_string(),
             bind_port: 8080,
-            ws_path: "/ws".to_string(),
-            record_path: "/record".to_string(),
+            routes: vec![],
         }
     }
 
@@ -136,19 +163,13 @@ impl<T: Clone + Send + 'static> JambonzWebServer<T> {
         self.bind_port = port;
         self
     }
-
-    pub fn with_ws_path(mut self, path: impl Into<String>) -> Self {
-        self.ws_path = path.into();
-        self
-    }
-
-    pub fn with_record_path(mut self, path: impl Into<String>) -> Self {
-        self.record_path = path.into();
+    pub fn add_route(mut self, route: Route<T>) -> Self {
+        self.routes.push(route);
         self
     }
 
     pub async fn start(self) -> Server {
-        start_jambonz_server(self)
+        start_server(self)
     }
 }
 
@@ -156,5 +177,10 @@ pub struct HandlerContext<T> {
     pub uuid: Uuid,
     pub session: Session,
     pub request: JambonzRequest,
-    pub state: T,
+    pub state: Data<T>,
+}
+
+#[derive(Clone)]
+pub struct TestData {
+    pub message:String
 }

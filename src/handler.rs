@@ -1,10 +1,11 @@
-use crate::{HandlerContext, HandlerFn, JambonzRequest, JambonzState};
+use crate::{HandlerContext, HandlerFn, JambonzRequest};
 use actix_web::web::Data;
 use actix_ws::{Message, Session};
 use futures_util::{
     future::{self, Either},
     StreamExt as _,
 };
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::{pin, time::interval};
 use uuid::Uuid;
@@ -20,7 +21,8 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 pub async fn handler<T: 'static + Clone>(
     mut session: Session,
     mut msg_stream: actix_ws::MessageStream,
-    state: Data<JambonzState<T>>,
+    state: Data<T>,
+    handler: Arc<HandlerFn<T>>,
 ) {
     let uuid = Uuid::new_v4();
     println!("Handler:new_session: {}", uuid.to_string());
@@ -47,9 +49,9 @@ pub async fn handler<T: 'static + Clone>(
                                 uuid,
                                 session: session.clone(),
                                 request: req,
-                                state: state.state.clone(),
+                                state: state.clone(),
                             };
-                            (state.handler)(ctx).await;
+                            (handler)(ctx).await;
                         }
                         Err(e) => {
                             println!("Error reading TextMessage: {}", e);
@@ -62,9 +64,9 @@ pub async fn handler<T: 'static + Clone>(
                             uuid,
                             session: session.clone(),
                             request: req,
-                            state: state.state.clone(),
+                            state: state.clone(),
                         };
-                        (state.handler)(ctx).await;
+                        (handler)(ctx).await;
                     }
 
                     Message::Close(reason) => {
@@ -73,9 +75,9 @@ pub async fn handler<T: 'static + Clone>(
                             uuid,
                             session: session.clone(),
                             request: req,
-                            state: state.state.clone(),
+                            state: state.clone(),
                         };
-                        (state.handler)(ctx).await;
+                        (handler)(ctx).await;
                         break reason;
                     }
 
