@@ -1,9 +1,10 @@
 mod handler;
 
+use actix_web::dev::Server;
 use actix_web::http::header::{HeaderName, HeaderValue};
+use actix_web::middleware::Logger;
 use actix_web::web::{Data, Payload, resource};
 use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, rt, web};
-use actix_web::{middleware::Logger};
 use actix_ws::{AggregatedMessage, Session};
 use cal_jambonz::ws::WebsocketRequest;
 use futures_util::StreamExt;
@@ -79,7 +80,6 @@ pub struct JambonzState<T> {
     pub handler: fn(Uuid, Session, JambonzRequest, T),
 }
 
-
 async fn echo(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, Error> {
     let (res, mut session, stream) = actix_ws::handle(&req, stream)?;
 
@@ -117,23 +117,20 @@ async fn echo(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, Er
     Ok(res)
 }
 
-impl<T: Send + Sync + 'static + Clone> JambonzWebServer<T> {
-    pub async fn start(self) -> std::io::Result<()> {
-        HttpServer::new(move || {
-            let state = Data::new(JambonzState {
-                app_state: self.app_state.clone(),
-                handler: self.handler.clone(),
-            });
-            App::new()
-                .app_data(state)
-                .route(self.ws_path.clone().as_str(), web::get().to(echo))
-                // .service(
-                //     resource(self.record_path.clone()).route(web::get().to(handle_record::<T>)),
-                // )
-        })
-        .bind((self.bind_ip, self.bind_port))
-        .expect("Can not bind to server/port")
-        .run()
-        .await
-    }
+pub fn start_jambonz_server<T: Clone + Send + 'static>(server: JambonzWebServer<T>) -> Server {
+    HttpServer::new(move || {
+        let state = Data::new(JambonzState {
+            app_state: server.app_state.clone(),
+            handler: server.handler.clone(),
+        });
+        App::new()
+            .app_data(state)
+            .route(server.ws_path.clone().as_str(), web::get().to(echo))
+        // .service(
+        //     resource(self.record_path.clone()).route(web::get().to(handle_record::<T>)),
+        // )
+    })
+    .bind((server.bind_ip, server.bind_port))
+    .expect("Can not bind to server/port")
+    .run()
 }
