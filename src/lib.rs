@@ -4,8 +4,9 @@ use actix_web::http::header::{HeaderName, HeaderValue};
 use actix_web::web::{Data, Payload, resource};
 use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, rt, web};
 use actix_web::{middleware::Logger};
-use actix_ws::Session;
+use actix_ws::{AggregatedMessage, Session};
 use cal_jambonz::ws::WebsocketRequest;
+use futures_util::StreamExt;
 use uuid::Uuid;
 
 fn jambonz_handler<T, F: Fn(Uuid, Session, JambonzRequest, T)>(
@@ -78,6 +79,44 @@ pub struct JambonzState<T> {
     pub handler: fn(Uuid, Session, JambonzRequest, T),
 }
 
+
+async fn echo(req: HttpRequest, stream: web::Payload) -> Result<HttpResponse, Error> {
+    let (res, mut session, stream) = actix_ws::handle(&req, stream)?;
+
+    let mut stream = stream
+        .aggregate_continuations()
+        // aggregate continuation frames up to 1MiB
+        .max_continuation_size(2_usize.pow(20));
+
+    // start task but don't wait for it
+    rt::spawn(async move {
+        // receive messages from websocket
+        while let Some(msg) = stream.next().await {
+            match msg {
+                Ok(AggregatedMessage::Text(text)) => {
+                    // echo text message
+                    session.text(text).await.unwrap();
+                }
+
+                Ok(AggregatedMessage::Binary(bin)) => {
+                    // echo binary message
+                    session.binary(bin).await.unwrap();
+                }
+
+                Ok(AggregatedMessage::Ping(msg)) => {
+                    // respond to PING frame with PONG frame
+                    session.pong(&msg).await.unwrap();
+                }
+
+                _ => {}
+            }
+        }
+    });
+
+    // respond immediately with response connected to WS session
+    Ok(res)
+}
+
 impl<T: Send + Sync + 'static + Clone> JambonzWebServer<T> {
     pub async fn start(self) -> std::io::Result<()> {
         HttpServer::new(move || {
@@ -87,11 +126,7 @@ impl<T: Send + Sync + 'static + Clone> JambonzWebServer<T> {
             });
             App::new()
                 .app_data(state)
-                .service(resource("/test").route(web::get().to(|| {
-                    println!("test");
-                    HttpResponse::Ok()
-                })))
-                .route(self.ws_path.clone().as_str(), web::get().to(handle_ws::<T>))
+                .route(self.ws_path.clone().as_str(), web::get().to(echo))
                 // .service(
                 //     resource(self.record_path.clone()).route(web::get().to(handle_record::<T>)),
                 // )
