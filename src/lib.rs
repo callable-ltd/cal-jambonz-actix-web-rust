@@ -25,6 +25,7 @@ async fn handle_ws<T: 'static + Clone>(
     stream: Payload,
     state: Data<JambonzState<T>>,
 ) -> Result<HttpResponse, Error> {
+    println!("handle_ws");
     ws_response(&req, stream, state, "ws.jambonz.org")
 }
 
@@ -125,7 +126,7 @@ pub fn start_jambonz_server<T: Clone + Send + 'static>(server: JambonzWebServer<
         });
         App::new()
             .app_data(state)
-            .route(server.ws_path.clone().as_str(), web::get().to(echo))
+            .route(server.ws_path.clone().as_str(), web::get().to(handle_ws::<T>))
         // .service(
         //     resource(self.record_path.clone()).route(web::get().to(handle_record::<T>)),
         // )
