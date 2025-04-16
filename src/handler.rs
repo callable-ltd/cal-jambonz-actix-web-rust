@@ -1,14 +1,10 @@
-use crate::recording::{start_recording, transcode, write, RecordingSession};
-use crate::{jambonz_handler, AppState, JambonzRequest, JambonzState};
+use crate::{jambonz_handler, JambonzRequest, JambonzState};
 use actix_web::web::Data;
 use actix_ws::{Message, Session};
-use cal_jambonz::payload::ws::WebsocketRequest;
 use futures_util::{
     future::{self, Either},
     StreamExt as _,
 };
-use log::{info, warn};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::{pin, time::interval};
 use uuid::Uuid;
@@ -77,7 +73,7 @@ pub async fn echo_heartbeat_ws<T: Clone>(
                     }
 
                     Message::Continuation(_) => {
-                        warn!("no support for continuation frames");
+                        println!("no support for continuation frames");
                     }
 
                     // no-op; ignore
@@ -87,7 +83,7 @@ pub async fn echo_heartbeat_ws<T: Clone>(
 
             // client WebSocket stream error
             Either::Left((Some(Err(err)), _)) => {
-                log::error!("{}", err);
+                println!("{}", err);
                 break None;
             }
 
@@ -98,7 +94,7 @@ pub async fn echo_heartbeat_ws<T: Clone>(
             Either::Right((_inst, _)) => {
                 // if no heartbeat ping/pong received recently, close the connection
                 if Instant::now().duration_since(last_heartbeat) > CLIENT_TIMEOUT {
-                    info!(
+                    println!(
                         "client has not sent heartbeat in over {CLIENT_TIMEOUT:?}; disconnecting"
                     );
                     break None;
