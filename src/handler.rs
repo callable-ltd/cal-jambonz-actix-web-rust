@@ -1,9 +1,9 @@
-use crate::{jambonz_handler, JambonzRequest, JambonzState};
+use crate::{JambonzRequest, JambonzState, jambonz_handler};
 use actix_web::web::Data;
 use actix_ws::{Message, Session};
 use futures_util::{
-    future::{self, Either},
     StreamExt as _,
+    future::{self, Either},
 };
 use std::time::{Duration, Instant};
 use tokio::{pin, time::interval};
@@ -22,8 +22,8 @@ pub async fn echo_heartbeat_ws<T: Clone>(
     mut msg_stream: actix_ws::MessageStream,
     state: Data<JambonzState<T>>,
 ) {
-
     let uuid = Uuid::new_v4();
+    println!("Handler:new_session: {}", uuid.to_string());
 
     let mut last_heartbeat = Instant::now();
     let mut interval = interval(HEARTBEAT_INTERVAL);
@@ -40,26 +40,42 @@ pub async fn echo_heartbeat_ws<T: Clone>(
             // received message from WebSocket client
             Either::Left((Some(Ok(msg)), _)) => {
                 match msg {
-                    Message::Text(text) => {
-                        match serde_json::from_str(&text) {
-                            Ok(json) => {
-                                let req = JambonzRequest::TextMessage(json);
-                                jambonz_handler(uuid, session.clone(), req, state.app_state.clone(), state.handler);
-                            }
-                            Err(e) => {
-                                println!("Error reading TextMessage: {}", e);
-                            }
+                    Message::Text(text) => match serde_json::from_str(&text) {
+                        Ok(json) => {
+                            let req = JambonzRequest::TextMessage(json);
+                            let _ = jambonz_handler(
+                                uuid,
+                                session.clone(),
+                                req,
+                                state.app_state.clone(),
+                                state.handler,
+                            );
                         }
-                    }
+                        Err(e) => {
+                            println!("Error reading TextMessage: {}", e);
+                        }
+                    },
 
                     Message::Binary(bytes) => {
                         let req = JambonzRequest::Binary(bytes.into_iter().collect::<Vec<_>>());
-                        jambonz_handler(uuid,session.clone(), req, state.app_state.clone(), state.handler);
+                        jambonz_handler(
+                            uuid,
+                            session.clone(),
+                            req,
+                            state.app_state.clone(),
+                            state.handler,
+                        );
                     }
 
                     Message::Close(reason) => {
                         let req = JambonzRequest::Close;
-                        jambonz_handler(uuid,session.clone(), req, state.app_state.clone(), state.handler);
+                        jambonz_handler(
+                            uuid,
+                            session.clone(),
+                            req,
+                            state.app_state.clone(),
+                            state.handler,
+                        );
                         break reason;
                     }
 
