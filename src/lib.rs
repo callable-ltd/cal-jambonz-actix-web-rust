@@ -3,50 +3,49 @@ mod handler;
 use actix_web::dev::Server;
 use actix_web::http::header::{HeaderName, HeaderValue};
 use actix_web::web::{Data, Payload};
-use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, rt, web};
+use actix_web::{rt, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_ws::Session;
 use cal_jambonz::ws::WebsocketRequest;
-use std::pin::Pin;
 use uuid::Uuid;
 
-async fn handle_ws<
-    T: 'static + Clone,
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()>>> + Clone + 'static,
->(
+async fn handle_ws<T: 'static + Clone, U: Fn(Uuid, Session, JambonzRequest, Data<T>) + 'static>(
     req: HttpRequest,
     stream: Payload,
-    state: Data<JambonzState<T, U>>,
+    state: Data<T>,
+    handler: Data<U>,
 ) -> Result<HttpResponse, Error> {
-    ws_response(&req, stream, state, "ws.jambonz.org")
+    ws_response(&req, stream, state, handler, "ws.jambonz.org")
 }
 
 async fn handle_record<
     T: 'static + Clone,
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()>>> + Clone + 'static,
+    U: Fn(Uuid, Session, JambonzRequest, Data<T>) + 'static,
 >(
     req: HttpRequest,
     stream: Payload,
-    state: Data<JambonzState<T, U>>,
+    state: Data<T>,
+    handler: Data<U>,
 ) -> Result<HttpResponse, Error> {
-    ws_response(&req, stream, state, "audio.jambonz.org")
+    ws_response(&req, stream, state, handler, "audio.jambonz.org")
 }
 
-fn ws_response<
-    T: 'static + Clone,
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()>>> + Clone + 'static,
->(
+fn ws_response<T: 'static + Clone, U: Fn(Uuid, Session, JambonzRequest, Data<T>) + 'static>(
     req: &HttpRequest,
     stream: Payload,
-    state: Data<JambonzState<T, U>>,
+    state: Data<T>,
+    handler: Data<U>,
     protocol: &str,
 ) -> Result<HttpResponse, Error> {
     let result = actix_ws::handle(&req, stream)?;
     let (mut res, session, msg_stream) = result;
+
     rt::spawn(handler::echo_heartbeat_ws(
         session,
         msg_stream,
         state.clone(),
+        handler.clone(),
     ));
+
     let ws_header = HeaderName::from_bytes("Sec-WebSocket-Protocol".to_string().as_bytes())
         .expect("should be valid WebSocket-Protocol");
 
@@ -63,43 +62,28 @@ pub enum JambonzRequest {
     Close,
 }
 
-pub struct JambonzWebServer<T, U>
-where
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()>>>,
-{
+pub struct JambonzWebServer<T> {
     pub bind_ip: String,
     pub bind_port: u16,
     pub app_state: T,
     pub ws_path: String,
     pub record_path: String,
-    pub handler: U,
-}
-
-#[derive(Clone)]
-pub struct JambonzState<T, U>
-where
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()>>>,
-{
-    pub app_state: T,
-    pub handler: U,
 }
 
 pub fn start_jambonz_server<
     T: Clone + Send + 'static,
-    U: Fn(Uuid, Session, JambonzRequest, T) -> Pin<Box<dyn Future<Output = ()>>>
-        + Clone
-        + Send
-        + 'static,
+    U: Future + Fn(Uuid, Session, JambonzRequest, Data<T>) + 'static,
 >(
-    server: JambonzWebServer<T, U>,
+    server: JambonzWebServer<T>,
+    handler: fn(Uuid, Session, JambonzRequest, T) -> U,
 ) -> Server {
     HttpServer::new(move || {
-        let state = Data::new(JambonzState {
-            app_state: server.app_state.clone(),
-            handler: server.handler.clone(),
-        });
+        let d1 = Data::new(handler);
+        let d2 = Data::new(server.app_state.clone());
+
         App::new()
-            .app_data(state)
+            .app_data(d1)
+            .app_data(d2)
             .route(
                 server.ws_path.clone().as_str(),
                 web::get().to(handle_ws::<T, U>),
