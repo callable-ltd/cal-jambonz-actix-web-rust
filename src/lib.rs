@@ -10,7 +10,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
 
-type HandlerFn<T> =
+pub type HandlerFn<T> =
     Arc<dyn Fn(HandlerContext<T>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 type WsHandler<T> = Arc<
