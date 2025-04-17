@@ -168,7 +168,7 @@ impl<T: Clone + Send + 'static + Sync> JambonzWebServer<T> {
         self
     }
 
-    pub async fn start(self) -> Server {
+    pub fn start(self) -> Server {
         start_server(self)
     }
 }
