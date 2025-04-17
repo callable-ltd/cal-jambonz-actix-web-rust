@@ -1,11 +1,13 @@
-use crate::{HandlerContext, HandlerFn, JambonzRequest};
+use crate::{
+    HandlerContext, JambonzRequest, JambonzRoute, JambonzRouteType,
+};
 use actix_web::web::Data;
 use actix_ws::{Message, Session};
+use cal_jambonz::ws::{RecordingRequest, WebsocketRequest};
 use futures_util::{
     future::{self, Either},
     StreamExt as _,
 };
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::{pin, time::interval};
 use uuid::Uuid;
@@ -22,7 +24,7 @@ pub async fn handler<T: 'static + Clone>(
     mut session: Session,
     mut msg_stream: actix_ws::MessageStream,
     state: Data<T>,
-    handler: Arc<HandlerFn<T>>,
+    route: JambonzRoute<T>,
 ) {
     let uuid = Uuid::new_v4();
     println!("Handler:new_session: {}", uuid.to_string());
@@ -41,62 +43,121 @@ pub async fn handler<T: 'static + Clone>(
         match future::select(msg_stream.next(), tick).await {
             // received message from WebSocket client
             Either::Left((Some(Ok(msg)), _)) => {
-                match msg {
-                    Message::Text(text) => match serde_json::from_str(&text) {
-                        Ok(json) => {
-                            let req = JambonzRequest::TextMessage(json);
-                            let ctx = HandlerContext {
-                                uuid,
-                                session: session.clone(),
-                                request: req,
-                                state: state.clone(),
-                            };
-                            (handler)(ctx).await;
-                        }
-                        Err(e) => {
-                            println!("Error reading TextMessage: {}", e);
-                        }
-                    },
+                match route.ws_type {
+                    JambonzRouteType::Hook => {
+                        match msg {
+                            Message::Text(text) => match serde_json::from_str(&text) {
+                                Ok(json) => {
+                                    let request = JambonzRequest::Hook(json);
+                                    let ctx = HandlerContext {
+                                        uuid,
+                                        request,
+                                        session: session.clone(),
+                                        state: state.clone(),
+                                    };
+                                    (route.handler)(ctx).await;
+                                }
+                                Err(e) => {
+                                    println!("Error reading TextMessage: {}", e);
+                                }
+                            },
 
-                    Message::Binary(bytes) => {
-                        let req = JambonzRequest::Binary(bytes.into_iter().collect::<Vec<_>>());
-                        let ctx = HandlerContext {
-                            uuid,
-                            session: session.clone(),
-                            request: req,
-                            state: state.clone(),
+                            Message::Binary(bytes) => {
+                                //Do Nothing, not expecting binary on Hook request
+                            }
+
+                            Message::Close(reason) => {
+                                let payload = WebsocketRequest::Close;
+                                let request = JambonzRequest::Hook(payload);
+                                let ctx = HandlerContext {
+                                    uuid,
+                                    request,
+                                    session: session.clone(),
+                                    state: state.clone(),
+                                };
+                                (route.handler)(ctx).await;
+                                break reason;
+                            }
+
+                            Message::Ping(bytes) => {
+                                last_heartbeat = Instant::now();
+                                let _ = session.pong(&bytes).await;
+                            }
+
+                            Message::Pong(_) => {
+                                last_heartbeat = Instant::now();
+                            }
+
+                            Message::Continuation(_) => {
+                                println!("no support for continuation frames");
+                            }
+
+                            // no-op; ignore
+                            Message::Nop => {}
                         };
-                        (handler)(ctx).await;
                     }
+                    JambonzRouteType::Recording => {
+                        match msg {
+                            Message::Text(text) => match serde_json::from_str(&text) {
+                                Ok(json) => {
+                                    let payload = RecordingRequest::SessionNew(json);
+                                    let request = JambonzRequest::Recording(payload);
+                                    let ctx = HandlerContext {
+                                        uuid,
+                                        request,
+                                        session: session.clone(),
+                                        state: state.clone(),
+                                    };
+                                    (route.handler)(ctx).await;
+                                }
+                                Err(e) => {
+                                    println!("Error reading TextMessage: {}", e);
+                                }
+                            },
 
-                    Message::Close(reason) => {
-                        let req = JambonzRequest::Close;
-                        let ctx = HandlerContext {
-                            uuid,
-                            session: session.clone(),
-                            request: req,
-                            state: state.clone(),
+                            Message::Binary(bytes) => {
+                                let vec = bytes.into_iter().collect::<Vec<_>>();
+                                let payload = RecordingRequest::Binary(vec);
+                                let request = JambonzRequest::Recording(payload);
+                                let ctx = HandlerContext {
+                                    uuid,
+                                    request,
+                                    session: session.clone(),
+                                    state: state.clone(),
+                                };
+                                (route.handler)(ctx).await;
+                            }
+
+                            Message::Close(reason) => {
+                                let req = JambonzRequest::Hook(WebsocketRequest::Close);
+                                let ctx = HandlerContext {
+                                    uuid,
+                                    session: session.clone(),
+                                    request: req,
+                                    state: state.clone(),
+                                };
+                                (route.handler)(ctx).await;
+                                break reason;
+                            }
+
+                            Message::Ping(bytes) => {
+                                last_heartbeat = Instant::now();
+                                let _ = session.pong(&bytes).await;
+                            }
+
+                            Message::Pong(_) => {
+                                last_heartbeat = Instant::now();
+                            }
+
+                            Message::Continuation(_) => {
+                                println!("no support for continuation frames");
+                            }
+
+                            // no-op; ignore
+                            Message::Nop => {}
                         };
-                        (handler)(ctx).await;
-                        break reason;
                     }
-
-                    Message::Ping(bytes) => {
-                        last_heartbeat = Instant::now();
-                        let _ = session.pong(&bytes).await;
-                    }
-
-                    Message::Pong(_) => {
-                        last_heartbeat = Instant::now();
-                    }
-
-                    Message::Continuation(_) => {
-                        println!("no support for continuation frames");
-                    }
-
-                    // no-op; ignore
-                    Message::Nop => {}
-                };
+                }
             }
 
             // client WebSocket stream error

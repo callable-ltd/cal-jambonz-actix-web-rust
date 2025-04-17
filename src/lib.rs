@@ -5,7 +5,7 @@ use actix_web::http::header::{HeaderName, HeaderValue};
 use actix_web::web::{Data, Payload};
 use actix_web::{rt, web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_ws::Session;
-use cal_jambonz::ws::WebsocketRequest;
+use cal_jambonz::ws::{JambonzRequest, WebsocketRequest};
 use std::pin::Pin;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -32,27 +32,6 @@ where
     Arc::new(move |ctx: HandlerContext<T>| Box::pin(handler(ctx)))
 }
 
-// async fn handle_record<T: 'static + Clone>(
-//     req: HttpRequest,
-//     stream: Payload,
-//     state: Data<JambonzState<T>>,
-// ) -> Result<HttpResponse, Error> {
-//     ws_response(&req, stream, state, "audio.jambonz.org")
-// }
-
-async fn handle_ws<T: Clone + Send + Sync + 'static>(
-    req: HttpRequest,
-    stream: Payload,
-    state: Data<T>,
-    route: JambonzRoute<T>,
-) -> Result<HttpResponse, Error> {
-    let protocol = match route.ws_type {
-        JambonzRouteType::Hook => "ws.jambonz.org",
-        JambonzRouteType::Recording => "audio.jambonz.org"
-    };
-    ws_response(&req, stream, state, protocol, route.handler.into()).await
-}
-
 #[derive(Clone)]
 pub struct JambonzRoute<T> {
     pub path: String,
@@ -70,16 +49,19 @@ async fn ws_response<T: Clone + 'static>(
     req: &HttpRequest,
     stream: Payload,
     state: Data<T>,
-    protocol: &str,
-    handler: Arc<HandlerFn<T>>,
+    route: JambonzRoute<T>,
 ) -> Result<HttpResponse, Error> {
     match actix_ws::handle(req, stream) {
         Ok((mut res, session, msg_stream)) => {
+            let protocol = match route.ws_type {
+                JambonzRouteType::Hook => "ws.jambonz.org",
+                JambonzRouteType::Recording => "audio.jambonz.org"
+            };
             res.headers_mut().insert(
                 HeaderName::from_static("sec-websocket-protocol"),
                 HeaderValue::from_str(protocol).expect("valid header value"),
             );
-            rt::spawn(handler::handler(session, msg_stream, state, handler));
+            rt::spawn(handler::handler(session, msg_stream, state, route));
             Ok(res)
         }
         Err(e) => {
@@ -113,7 +95,7 @@ where
             let handler_fn = move |req, stream, state| {
                 let route_clone = route_clone.clone(); // Clone again for the inner closure
                 async move {
-                    handle_ws(req, stream, state, route_clone).await
+                    ws_response(&req, stream, state, route_clone).await
                 }
             };
 
@@ -128,11 +110,7 @@ where
         .run()
 }
 
-pub enum JambonzRequest {
-    TextMessage(WebsocketRequest),
-    Binary(Vec<u8>),
-    Close,
-}
+
 
 pub struct JambonzWebServer<T> {
     pub bind_ip: String,

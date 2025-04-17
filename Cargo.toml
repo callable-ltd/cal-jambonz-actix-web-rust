@@ -1,12 +1,12 @@
 [package]
 name = "cal-jambonz-actix"
-version = "0.1.23"
+version = "0.1.24"
 edition = "2024"
 description = "Jambonz Verbs"
 license = "MIT"
 
 [dependencies]
-cal-jambonz = "0.1.69"
+cal-jambonz = "0.1.70"
 actix-web = "4.10.2"
 actix-web-httpauth = "0.8.2"
 actix-ws = "0.3.0"
