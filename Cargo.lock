@@ -398,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "cal-jambonz-actix"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
  "actix-web",
  "actix-web-httpauth",

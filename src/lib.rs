@@ -44,24 +44,24 @@ async fn handle_ws<T: Clone + Send + Sync + 'static>(
     req: HttpRequest,
     stream: Payload,
     state: Data<T>,
-    route: Route<T>,
+    route: JambonzRoute<T>,
 ) -> Result<HttpResponse, Error> {
     let protocol = match route.ws_type {
-        WebsocketType::Hook => "ws.jambonz.org",
-        WebsocketType::Recording => "audio.jambonz.org"
+        JambonzRouteType::Hook => "ws.jambonz.org",
+        JambonzRouteType::Recording => "audio.jambonz.org"
     };
     ws_response(&req, stream, state, protocol, route.handler.into()).await
 }
 
 #[derive(Clone)]
-struct Route<T> {
+pub struct JambonzRoute<T> {
     pub path: String,
-    pub ws_type: WebsocketType,
+    pub ws_type: JambonzRouteType,
     pub handler: Arc<dyn Fn(HandlerContext<T>) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>,
 }
 
 #[derive(Clone)]
-pub enum WebsocketType {
+pub enum JambonzRouteType {
     Hook,
     Recording,
 }
@@ -138,7 +138,7 @@ pub struct JambonzWebServer<T> {
     pub bind_ip: String,
     pub bind_port: u16,
     pub app_state: T,
-    pub routes: Vec<Route<T>>,
+    pub routes: Vec<JambonzRoute<T>>,
 }
 
 impl<T: Clone + Send + 'static + Sync> JambonzWebServer<T> {
@@ -163,7 +163,7 @@ impl<T: Clone + Send + 'static + Sync> JambonzWebServer<T> {
         self.bind_port = port;
         self
     }
-    pub fn add_route(mut self, route: Route<T>) -> Self {
+    pub fn add_route(mut self, route: JambonzRoute<T>) -> Self {
         self.routes.push(route);
         self
     }
