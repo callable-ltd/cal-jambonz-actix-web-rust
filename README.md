@@ -14,6 +14,13 @@ A lightweight, extensible WebSocket framework built with [Actix Web](https://act
 
 ---
 
+## 📝 TODO
+
+- [ ] Receive REST web hooks
+- [ ] Basic Auth
+
+---
+
 ## 🔧 Quick Start
 
 ### 1. Define Your App State
@@ -195,7 +202,7 @@ Use `ctx.session.text(...)` to respond directly to the WebSocket client.
 
 ## 🧱 Contributing
 
-PRs and issues are welcome. Whether it’s bug fixes, new features, or documentation improvements — let’s build together.
+PRs and issues are welcome. Whether it's bug fixes, new features, or documentation improvements — let's build together.
 
 ---
 
